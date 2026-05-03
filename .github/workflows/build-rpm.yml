@@ -1,0 +1,150 @@
+name: Weekly RPM build
+
+on:
+  schedule:
+    - cron: '0 6 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  check:
+    name: Check upstream versions
+    runs-on: ubuntu-latest
+    container: fedora:latest
+    outputs:
+      changed: ${{ steps.gate.outputs.changed }}
+      tag: ${{ steps.gate.outputs.tag }}
+    steps:
+      - name: Install prerequisites
+        run: dnf install -y --setopt=install_weak_deps=False git curl sed
+
+      - uses: actions/checkout@v4
+
+      - name: Mark workspace safe for git
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
+      - name: Refresh version files
+        working-directory: fc
+        run: bash update_versions.bash
+
+      - name: Gate on upstream changes
+        id: gate
+        run: |
+          if git diff --quiet -- fc/version.esr fc/version.dev fc/version.ngt; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "No upstream version change; skipping build."
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            echo "Upstream change detected; proceeding."
+          fi
+          echo "tag=weekly-$(cat fc/version.release_prefix)" >> "$GITHUB_OUTPUT"
+
+      - name: Upload version files
+        if: steps.gate.outputs.changed == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: versions
+          path: |
+            fc/version.esr
+            fc/version.dev
+            fc/version.ngt
+            fc/version.release_prefix
+
+  build:
+    name: Build RPM (fc${{ matrix.fedora }})
+    needs: check
+    if: needs.check.outputs.changed == 'true'
+    runs-on: ubuntu-latest
+    container: fedora:${{ matrix.fedora }}
+    strategy:
+      fail-fast: false
+      matrix:
+        fedora: ['41', '42', '43']
+    steps:
+      - name: Install prerequisites
+        run: dnf install -y --setopt=install_weak_deps=False git rpm-build rpmdevtools curl chrpath tar sed
+
+      - uses: actions/checkout@v4
+
+      - name: Mark workspace safe for git
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
+      - name: Pull updated version files
+        uses: actions/download-artifact@v4
+        with:
+          name: versions
+          path: fc/
+
+      - name: Set up rpmbuild tree
+        run: rpmdev-setuptree
+
+      - name: Generate spec from template
+        working-directory: fc
+        run: bash make_spec.bash
+
+      - name: Stage local sources
+        working-directory: fc
+        run: bash prepare_local_source.bash
+
+      - name: Fetch upstream Firefox tarballs
+        working-directory: fc
+        run: spectool -g -R firefox-non-release.spec
+
+      - name: Build binary RPMs
+        working-directory: fc
+        run: rpmbuild -bb firefox-non-release.spec
+
+      - name: Collect built RPMs
+        run: |
+          mkdir -p out
+          find ~/rpmbuild/RPMS -type f -name '*.rpm' -exec cp {} out/ \;
+          ls -la out/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rpms-fc${{ matrix.fedora }}
+          path: out/*.rpm
+          if-no-files-found: error
+
+  release:
+    name: Publish release
+    needs: [check, build]
+    if: needs.check.outputs.changed == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Pull updated version files
+        uses: actions/download-artifact@v4
+        with:
+          name: versions
+          path: fc/
+
+      - name: Pull all RPM artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: rpms-fc*
+          merge-multiple: true
+          path: out/
+
+      - name: Commit version bumps back to main
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add fc/version.esr fc/version.dev fc/version.ngt fc/version.release_prefix
+          if git diff --cached --quiet; then
+            echo "No version files to commit."
+          else
+            git commit -m "weekly: bump versions for ${{ needs.check.outputs.tag }}"
+            git push
+          fi
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.check.outputs.tag }}
+          name: ${{ needs.check.outputs.tag }}
+          files: out/*.rpm
+          make_latest: true
+          fail_on_unmatched_files: true
