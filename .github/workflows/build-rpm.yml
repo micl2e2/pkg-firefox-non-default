@@ -90,11 +90,11 @@ jobs:
 
       - name: Fetch upstream Firefox tarballs
         working-directory: fc
-        run: spectool -g -R firefox-non-release.spec
+        run: spectool -g -R firefox-non-default.spec
 
       - name: Build binary RPMs
         working-directory: fc
-        run: rpmbuild -bb firefox-non-release.spec
+        run: rpmbuild -bb firefox-non-default.spec
 
       - name: Collect built RPMs
         run: |
