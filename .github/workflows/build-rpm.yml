@@ -53,15 +53,33 @@ jobs:
             fc/version.release_prefix
 
   build:
-    name: Build RPM (fc${{ matrix.fedora }})
+    name: Build RPM (fc${{ matrix.fedora_ver }}-${{ matrix.arch }})
     needs: check
     if: needs.check.outputs.changed == 'true'
     runs-on: ubuntu-latest
-    container: fedora:${{ matrix.fedora }}
+    container: fedora:${{ matrix.fedora_ver }}
     strategy:
       fail-fast: false
       matrix:
-        fedora: ['41', '42', '43']
+        include:
+          - fedora_ver: '41'
+            arch: 'x86_64'
+            runner: 'ubuntu-latest'
+          - fedora_ver: '42'
+            arch: 'x86_64'
+            runner: 'ubuntu-latest'
+          - fedora_ver: '43'
+            arch: 'x86_64'
+            runner: 'ubuntu-latest'
+          - fedora_ver: '41'
+            arch: 'aarch64'
+            runner: 'ubuntu-latest-arm64'
+          - fedora_ver: '42'
+            arch: 'aarch64'
+            runner: 'ubuntu-latest-arm64'
+          - fedora_ver: '43'
+            arch: 'aarch64'
+            runner: 'ubuntu-latest-arm64'
     steps:
       - name: Install prerequisites
         run: dnf install -y --setopt=install_weak_deps=False git rpm-build rpmdevtools curl chrpath tar sed
@@ -104,7 +122,7 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: rpms-fc${{ matrix.fedora }}
+          name: rpms-fc${{ matrix.fedora_ver }}
           path: out/*.rpm
           if-no-files-found: error
 
