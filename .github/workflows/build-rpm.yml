@@ -122,7 +122,7 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: rpms-fc${{ matrix.fedora_ver }}
+          name: rpms-fc${{ matrix.fedora_ver }}-${{ matrix.arch }}
           path: out/*.rpm
           if-no-files-found: error
 
