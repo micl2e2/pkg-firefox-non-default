@@ -33,7 +33,7 @@ jobs:
         id: gate
         run: |
           if git diff --quiet -- fc/version.esr fc/version.dev fc/version.ngt; then
-            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "changed=true" >> "$GITHUB_OUTPUT"
             echo "No upstream version change; skipping build."
           else
             echo "changed=true" >> "$GITHUB_OUTPUT"
